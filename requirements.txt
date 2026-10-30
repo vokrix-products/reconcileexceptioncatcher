@@ -1,4 +1,6 @@
-openai
+fastapi
+uvicorn[standard]
 requests
 pdfplumber
 openpyxl
+python-multipart
