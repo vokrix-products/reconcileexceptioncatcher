@@ -64,3 +64,23 @@ Cloudflare: reconcileexceptioncatcher.vokrix.co
 Landing: https://vokrix.co/reconcileexceptioncatcher
 
 Outreach: active
+
+## Dashboard (Vercel)
+
+- `dashboard/`: Vite + React + TanStack Router dashboard.
+- `dashboard/vercel.json`: SPA rewrite of all routes to `/index.html`.
+- Product copy is driven by Vercel env vars (`VITE_PRODUCT_ARCHETYPE`, `VITE_RECORDS_LABEL`, `VITE_RECORDS_SUBTITLE`, `VITE_FILTER_PLACEHOLDER`, `VITE_UPLOAD_DESCRIPTION`, `VITE_UPLOAD_EMPTY_STATE`).
+- Records are surfaced as reconciliation rows with statuses `confirmed:good` and `exception:warning`.
+
+## Worker (Railway)
+
+- Container entrypoint: `python3 poller.py` (see `Dockerfile` at repo root).
+- `poll()` runs a `while True` loop with a 60 second sleep and claims jobs where `status=eq.pending`, `job_type=eq.process_upload`, `product_id=eq.$PRODUCT_ID`.
+- Environment: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `PRODUCT_ID`, `ANTHROPIC_API_KEY`.
+- Each job: download the upload from the `uploads` bucket, run `processor.process_file(file_bytes)`, insert one row per result into `records` (with `source_file_path` from `job.input_file_path`), upload the result JSON to the `results` bucket, then set the job to `completed` or `failed` with `output_file_path`, `result_summary`, and `completed_at`.
+- A notification row is written to `notifications` on both success and failure; notification errors never break the poll loop.
+
+## Domain
+
+- Cloudflare: `reconcileexceptioncatcher.vokrix.co` points at the Vercel dashboard deployment.
+- Landing page: https://vokrix.co/reconcileexceptioncatcher
