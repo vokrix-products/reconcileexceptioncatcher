@@ -6,3 +6,5 @@ __pycache__/
 .env
 node_modules/
 dashboard/.env.local
+.vercel
+.env*
