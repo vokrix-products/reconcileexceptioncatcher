@@ -1,0 +1,7 @@
+{
+  "name": "reconcileexceptioncatcher",
+  "scripts": {
+    "build": "cd dashboard && npm install && npm run build",
+    "install": "cd dashboard && npm install"
+  }
+}
