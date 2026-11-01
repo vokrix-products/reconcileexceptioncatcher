@@ -1,15 +1,24 @@
 import hashlib
 import json
+import re
 import datetime
 from typing import Any, Dict, List, Optional
 import config
 
+def _normalize_key(key: Any) -> str:
+    """Collapse a column heading to a comparable token: 'Amount (USD)' -> 'amount'."""
+    text = re.sub(r"\([^)]*\)", " ", str(key))
+    text = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
+    return text
+
 def _find_value(row: Dict[str, Any], candidates: List[str]) -> Optional[Any]:
+    lookup = {}
+    for key, value in row.items():
+        lookup.setdefault(_normalize_key(key), value)
     for c in candidates:
-        for key, value in row.items():
-            if key.lower() == c.lower():
-                if value is not None and str(value).strip() != "":
-                    return value
+        value = lookup.get(_normalize_key(c))
+        if value is not None and str(value).strip() != "":
+            return value
     return None
 
 def _parse_float(value: Any) -> Optional[float]:
