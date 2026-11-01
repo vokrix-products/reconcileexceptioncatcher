@@ -1,3 +1,6 @@
 requests
 pdfplumber
 openpyxl
+fastapi
+uvicorn[standard]
+python-multipart
