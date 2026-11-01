@@ -1,4 +1,5 @@
 import io
+import re
 import csv
 import pdfplumber
 import openpyxl
@@ -6,49 +7,100 @@ from typing import List, Dict, Tuple, Any
 
 DELIMITERS = [",", "\t", ";", "|"]
 
+_NUMERIC_RE = re.compile(r"^-?\d[\d,]*\.?\d*$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$|^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$")
+
 
 def _lines_to_rows(text: str) -> List[Dict[str, Any]]:
     return [{"raw_text": line} for line in text.splitlines() if line.strip()]
 
 
-def _first_line(sample: str) -> str:
-    lines = sample.splitlines()
-    return lines[0] if lines else ""
+def _split(line: str, delimiter: str) -> List[str]:
+    return [field.strip() for field in line.split(delimiter)]
 
 
-def _detect_delimiter(sample: str) -> str:
-    """Pick the delimiter that appears most often in the header line."""
-    first = _first_line(sample)
-    counts = {d: first.count(d) for d in DELIMITERS}
-    best = max(counts, key=lambda d: counts[d])
-    return best if counts[best] > 0 else ","
+def _looks_like_value(field: str) -> bool:
+    """True when a field looks like an amount or a date rather than a heading."""
+    raw = field.strip()
+    if not raw:
+        return False
+    if _DATE_RE.match(raw):
+        return True
+    return bool(_NUMERIC_RE.match(raw.replace("$", "").replace(",", "")))
 
 
-def _looks_delimited(sample: str) -> bool:
-    first = _first_line(sample)
-    return any(delim in first for delim in DELIMITERS)
+def _rows_from_group(group: List[str], delimiter: str) -> List[Dict[str, Any]]:
+    """Treat the first all-text line in group as the header and parse the rest."""
+    header_index = None
+    for index, line in enumerate(group):
+        fields = _split(line, delimiter)
+        if not any(_looks_like_value(field) for field in fields):
+            header_index = index
+            break
+    if header_index is None:
+        return []
+
+    headers = _split(group[header_index], delimiter)
+    rows = []
+    for line in group[header_index + 1:]:
+        fields = _split(line, delimiter)
+        row = {}
+        for position, header in enumerate(headers):
+            row[header] = fields[position] if position < len(fields) else None
+        if any(str(value).strip() for value in row.values() if value is not None):
+            rows.append(row)
+    return rows
 
 
 def _parse_csv_text(text: str) -> List[Dict[str, Any]]:
     sample = text.strip()
     if not sample:
         return []
-    if "\n" not in sample:
-        return [{"raw_text": sample}]
-    if not _looks_delimited(sample):
+
+    lines = [line for line in sample.splitlines() if line.strip()]
+    if not lines:
+        return []
+    if len(lines) == 1:
+        if "|" in lines[0] and len(_split(lines[0], "|")) > 1:
+            rows = _rows_from_group(lines, "|")
+            if rows:
+                return rows
+        return [{"raw_text": lines[0]}]
+
+    # The delimiter is the one appearing on the most lines, not the one on line 1.
+    best_delimiter, best_count = None, 0
+    for delimiter in DELIMITERS:
+        count = sum(1 for line in lines if delimiter in line)
+        if count > best_count:
+            best_delimiter, best_count = delimiter, count
+    if best_delimiter is None or best_count < 2:
         return _lines_to_rows(sample)
+
+    # Keep only lines with the most common field count: drops preamble and footer.
+    by_field_count: Dict[int, List[str]] = {}
+    for line in lines:
+        if best_delimiter in line:
+            by_field_count.setdefault(len(_split(line, best_delimiter)), []).append(line)
+    modal_count = max(by_field_count, key=lambda count: len(by_field_count[count]))
+    group = by_field_count[modal_count]
+    if modal_count < 2 or len(group) < 2:
+        return _lines_to_rows(sample)
+
+    rows = _rows_from_group(group, best_delimiter)
+    if rows:
+        return rows
+
     try:
-        delimiter = _detect_delimiter(sample)
-        reader = csv.DictReader(io.StringIO(sample), delimiter=delimiter)
-        rows = []
+        reader = csv.DictReader(io.StringIO(sample), delimiter=best_delimiter)
+        legacy = []
         for row in reader:
             if any(str(v).strip() for v in row.values() if v is not None):
-                rows.append(row)
-        if rows:
-            return rows
-        return _lines_to_rows(sample)
+                legacy.append(row)
+        if legacy:
+            return legacy
     except Exception:
-        return _lines_to_rows(sample)
+        pass
+    return _lines_to_rows(sample)
 
 
 def extract_rows(file_bytes: bytes) -> Tuple[List[Dict[str, Any]], str]:
