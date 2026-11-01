@@ -84,17 +84,31 @@ def fetch_pending_jobs():
         return []
 
 
-def mark_job_running(job_id):
+def claim_job(job_id):
+    """Atomically claim a job.
+
+    Only succeeds if the row is still status=pending, so two workers racing on
+    the same job cannot both win. Returns True only for the winning caller.
+    """
     try:
-        requests.patch(
+        resp = requests.patch(
             REST_URL + "/jobs",
-            headers={**SB_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"},
-            params={"id": "eq." + str(job_id)},
+            headers={**SB_HEADERS, "Content-Type": "application/json", "Prefer": "return=representation"},
+            params={"id": "eq." + str(job_id), "status": "eq.pending"},
             json={"status": "processing", "started_at": now_iso()},
             timeout=30,
         )
     except Exception as exc:
-        print("mark_job_running failed for %s: %s" % (job_id, exc))
+        print("claim_job error for %s: %s" % (job_id, exc))
+        return False
+    if resp.status_code not in (200, 204):
+        print("claim_job failed %s: %s: %s" % (job_id, resp.status_code, resp.text[:300]))
+        return False
+    try:
+        rows = resp.json()
+    except Exception:
+        return False
+    return bool(rows)
 
 
 def update_job(job_id, status, output_file_path=None, result_summary=None):
@@ -118,27 +132,32 @@ def update_job(job_id, status, output_file_path=None, result_summary=None):
 
 
 def insert_records(records, job):
+    if not records:
+        return
     customer_id = job.get("customer_id")
-    for r in records:
-        try:
-            resp = requests.post(
-                REST_URL + "/records",
-                headers={**SB_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"},
-                json={
-                    "product_id": PRODUCT_ID,
-                    "customer_id": customer_id,
-                    "title": r["title"],
-                    "status": r["status"],
-                    "details": r["details"],
-                    "source_file_path": job["input_file_path"],
-                    "due_date": r.get("due_date"),
-                },
-                timeout=30,
-            )
-            if resp.status_code not in (200, 201, 204):
-                print("record insert failed %s: %s" % (resp.status_code, resp.text[:300]))
-        except Exception as exc:
-            print("record insert error: " + str(exc))
+    payload = [
+        {
+            "product_id": PRODUCT_ID,
+            "customer_id": customer_id,
+            "title": r["title"],
+            "status": r["status"],
+            "details": r["details"],
+            "source_file_path": job["input_file_path"],
+            "due_date": r.get("due_date"),
+        }
+        for r in records
+    ]
+    try:
+        resp = requests.post(
+            REST_URL + "/records",
+            headers={**SB_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"},
+            json=payload,
+            timeout=120,
+        )
+        if resp.status_code not in (200, 201, 204):
+            print("record insert failed %s: %s" % (resp.status_code, resp.text[:300]))
+    except Exception as exc:
+        print("record insert error: " + str(exc))
 
 
 def notify(job, ok):
@@ -171,8 +190,10 @@ def notify(job, ok):
 def process_job(job):
     job_id = job.get("id")
     input_file_path = job.get("input_file_path")
+    if not claim_job(job_id):
+        print("job %s already claimed by another worker - skipping" % job_id)
+        return
     print("processing job %s file=%s" % (job_id, input_file_path))
-    mark_job_running(job_id)
 
     if not input_file_path:
         update_job(job_id, "failed", result_summary={"error": "missing input_file_path"})
