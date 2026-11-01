@@ -31,6 +31,34 @@ def test_csv_semicolon():
     assert results[0]["status"] == "confirmed:good"
     print("test_csv_semicolon passed")
 
+def test_csv_pipe_with_preamble():
+    """Real-world ledger export: title/preamble lines above the header, a
+    comma-separated footer below the data, and parenthetical column names.
+
+    Regression for the bug where the delimiter was taken from line 1 only
+    (so a preamble meant no delimiter was found), which sent every row down
+    the raw_text fallback and produced all-exception output.
+    """
+    data = (
+        "GL Reconciliation Ledger - October 2024\n"
+        "Prepared by: Marcus Chen, Senior Accountant | Reviewed: Priya Raman, Controller\n"
+        "Entity: Northwind Logistics Inc. | Account: 1010-0042 Operating Cash - First Meridian Bank\n"
+        "Address: 4400 Harborview Blvd, Suite 300, Oakland, CA 94607\n"
+        "Row | Description | Reference | Amount (USD) | Date | Status\n"
+        "1 | ACH Deposit - Cascade Freight Partners | INV-2024-0871 | 18450.00 | 2024-10-02 | Matched\n"
+        "2 | Wire Out - Pacific Rim Container Co. | PO-4471 | -32780.55 | 2024-10-03 | Matched\n"
+        "Opening Balance (2024-10-01): 1,204,880.32\n"
+        "Unreconciled Difference: 12,340.00\n"
+    ).encode()
+    results = process_file(data)
+    assert len(results) == 2, "expected 2 data rows, got %d" % len(results)
+    assert results[0]["status"] == "confirmed:good", results[0]["status"]
+    assert results[1]["status"] == "confirmed:good", results[1]["status"]
+    assert results[0]["title"] == "ACH Deposit - Cascade Freight Partners", results[0]["title"]
+    assert results[0]["due_date"] == "2024-10-02", results[0]["due_date"]
+    assert results[1]["due_date"] == "2024-10-03", results[1]["due_date"]
+    print("test_csv_pipe_with_preamble passed")
+
 def test_text_fallback():
     data = b"Hello world\nSecond line\n"
     results = process_file(data)
@@ -63,6 +91,7 @@ if __name__ == "__main__":
     test_csv()
     test_csv_pipe()
     test_csv_semicolon()
+    test_csv_pipe_with_preamble()
     test_text_fallback()
     test_empty_bytes()
     test_excel_bytes()
