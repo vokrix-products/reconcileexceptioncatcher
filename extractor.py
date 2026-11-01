@@ -4,12 +4,30 @@ import pdfplumber
 import openpyxl
 from typing import List, Dict, Tuple, Any
 
+DELIMITERS = [",", "\t", ";", "|"]
+
+
 def _lines_to_rows(text: str) -> List[Dict[str, Any]]:
     return [{"raw_text": line} for line in text.splitlines() if line.strip()]
 
+
+def _first_line(sample: str) -> str:
+    lines = sample.splitlines()
+    return lines[0] if lines else ""
+
+
+def _detect_delimiter(sample: str) -> str:
+    """Pick the delimiter that appears most often in the header line."""
+    first = _first_line(sample)
+    counts = {d: first.count(d) for d in DELIMITERS}
+    best = max(counts, key=lambda d: counts[d])
+    return best if counts[best] > 0 else ","
+
+
 def _looks_delimited(sample: str) -> bool:
-    first = sample.splitlines()[0] if sample.splitlines() else ""
-    return any(delim in first for delim in [",", "\t", ";", "|"])
+    first = _first_line(sample)
+    return any(delim in first for delim in DELIMITERS)
+
 
 def _parse_csv_text(text: str) -> List[Dict[str, Any]]:
     sample = text.strip()
@@ -20,7 +38,8 @@ def _parse_csv_text(text: str) -> List[Dict[str, Any]]:
     if not _looks_delimited(sample):
         return _lines_to_rows(sample)
     try:
-        reader = csv.DictReader(io.StringIO(sample))
+        delimiter = _detect_delimiter(sample)
+        reader = csv.DictReader(io.StringIO(sample), delimiter=delimiter)
         rows = []
         for row in reader:
             if any(str(v).strip() for v in row.values() if v is not None):
@@ -30,6 +49,7 @@ def _parse_csv_text(text: str) -> List[Dict[str, Any]]:
         return _lines_to_rows(sample)
     except Exception:
         return _lines_to_rows(sample)
+
 
 def extract_rows(file_bytes: bytes) -> Tuple[List[Dict[str, Any]], str]:
     # Try PDF first

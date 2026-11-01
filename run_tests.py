@@ -13,6 +13,24 @@ def test_csv():
     assert "due_date" in results[0]
     print("test_csv passed")
 
+def test_csv_pipe():
+    data = b"supplier|description|amount|date\nAcme|Widget|9.99|2024-01-15\n"
+    results = process_file(data)
+    assert isinstance(results, list)
+    assert len(results) == 1
+    assert results[0]["title"] == "Acme"
+    assert results[0]["status"] == "confirmed:good"
+    assert results[0]["due_date"] == "2024-01-15"
+    print("test_csv_pipe passed")
+
+def test_csv_semicolon():
+    data = b"supplier;amount;date\nBeta;12.50;2024-01-16\n"
+    results = process_file(data)
+    assert len(results) == 1
+    assert results[0]["title"] == "Beta"
+    assert results[0]["status"] == "confirmed:good"
+    print("test_csv_semicolon passed")
+
 def test_text_fallback():
     data = b"Hello world\nSecond line\n"
     results = process_file(data)
@@ -43,6 +61,8 @@ def test_excel_bytes():
 
 if __name__ == "__main__":
     test_csv()
+    test_csv_pipe()
+    test_csv_semicolon()
     test_text_fallback()
     test_empty_bytes()
     test_excel_bytes()
